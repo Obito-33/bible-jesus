@@ -1,1 +1,248 @@
-# bible-jesus
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Jesus Tyson | Daily With Jesus</title>
+<style>
+*{box-sizing:border-box}
+body{
+ margin:0;
+ font-family:Georgia,serif;
+ background:linear-gradient(140deg,#102c27,#24483d,#647b60);
+ color:#fff;
+ min-height:100vh;
+}
+.container{max-width:850px;margin:auto;padding:25px 18px}
+header{text-align:center;padding:35px 10px}
+.logo{font-size:42px;color:#e8d5a4}
+h1{letter-spacing:5px;font-size:30px}
+.subtitle{color:#d9dfd1;font-style:italic}
+.panel{
+ background:#ffffff13;
+ border:1px solid #ffffff35;
+ border-radius:20px;
+ padding:22px;margin:18px 0;
+ backdrop-filter:blur(12px);
+}
+input,select,button{
+ width:100%;padding:13px;margin:8px 0;
+ border-radius:10px;border:1px solid #b9c5ad;
+ font-size:16px;
+}
+input,select{background:#fff;color:#233b31}
+button{
+ background:#d8bd80;color:#26382d;
+ border:0;font-weight:bold;cursor:pointer;
+}
+button:hover{background:#f0d9a5}
+.verse{
+ font-size:23px;line-height:1.7;
+ text-align:center;color:#fff4d9;
+}
+.ref{text-align:center;color:#e4cf9e}
+.small{font-size:13px;color:#d2dfd3}
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+ <div class="logo">✝</div>
+ <h1>JESUS TYSON</h1>
+ <p class="subtitle">A peaceful place to meet God's Word</p>
+ <p>🙏 Walk with Jesus every day</p>
+</header>
+
+<section class="panel">
+ <h2>🌿 Daily Bible Verse</h2>
+ <label>Your Name</label>
+ <input id="username" placeholder="Enter your name">
+
+ <label>Select Date</label>
+ <input type="date" id="date">
+
+ <label>Select Language</label>
+ <select id="language">
+  <option value="eng">English</option>
+  <option value="tam">Tamil</option>
+  <option value="hin">Hindi</option>
+  <option value="mal">Malayalam</option>
+  <option value="tel">Telugu</option>
+  <option value="kan">Kannada</option>
+ </select>
+
+ <label>Select Bible Translation</label>
+ <select id="bible">
+  <option value="">Load available Bibles first</option>
+ </select>
+
+ <button onclick="loadBibles()">Load Bible Translations</button>
+ <button onclick="getVerse()">Get My Daily Verse ❤️</button>
+</section>
+
+<section class="panel">
+ <h2 id="greeting">God's Word for You</h2>
+ <p class="verse" id="verse">Your daily Bible verse will appear here.</p>
+ <p class="ref" id="reference"></p>
+ <p class="small" id="status"></p>
+
+ <button onclick="speak('verse')">🔊 Listen to Bible Verse</button>
+ <button onclick="stopVoice()">⏹ Stop Voice</button>
+</section>
+
+<section class="panel">
+ <h2>💡 Understand God's Word</h2>
+ <p id="explanation">
+  Read your verse and click Explain to understand it in simple modern Tamil.
+ </p>
+ <button onclick="explainVerse()">Explain in Modern Tamil</button>
+ <button onclick="speak('explanation')">
+  🔊 Listen to Explanation
+ </button>
+</section>
+
+<section class="panel">
+ <h2>📖 Bible Reading</h2>
+ <p>Read the complete Bible using your selected translation.</p>
+ <input id="book" placeholder="Book ID (Example: GEN)">
+ <input id="chapter" placeholder="Chapter number (Example: 1)">
+ <button onclick="readChapter()">Read Chapter</button>
+ <div id="chapterContent"></div>
+</section>
+
+<p class="small" style="text-align:center;padding:20px">
+ JESUS TYSON © 2026 | Faith • Hope • Love
+</p>
+</div>
+
+<script>
+const API = "https://rest.api.bible/v1";
+let currentVerse = "";
+let currentExplanation = "";
+let dailyReference = "JHN.3.16";
+
+document.getElementById("date").value =
+ new Date().toISOString().split("T")[0];
+
+async function loadBibles(){
+ const key = prompt("Enter your API.Bible API key:");
+ if(!key) return;
+ localStorage.setItem("bibleKey",key);
+ try{
+  const res=await fetch(API+"/bibles",{
+   headers:{"api-key":key}
+  });
+  if(!res.ok) throw new Error("API error "+res.status);
+  const result=await res.json();
+  const lang=document.getElementById("language").value;
+  const list=result.data.filter(b=>b.language.id===lang);
+  const select=document.getElementById("bible");
+  select.innerHTML="";
+  list.forEach(b=>{
+   const option=document.createElement("option");
+   option.value=b.id;
+   option.textContent=b.name;
+   select.appendChild(option);
+  });
+  document.getElementById("status").textContent=
+   list.length+" Bible translations found.";
+ }catch(e){
+  alert("Could not load Bibles. Check your API key.");
+ }
+}
+
+async function getVerse(){
+ const name=document.getElementById("username").value.trim();
+ const date=document.getElementById("date").value;
+ const bible=document.getElementById("bible").value;
+ const key=localStorage.getItem("bibleKey");
+ if(!name || !date || !bible || !key){
+  alert("Enter your name, date and select a Bible.");
+  return;
+ }
+ const refs=["JHN.3.16","PSA.23.1","PRO.3.5",
+             "ISA.41.10","PHP.4.6","ROM.8.28"];
+ const day=new Date(date+"T12:00:00").getDate();
+ dailyReference=refs[(new Date(date).getTime()/86400000|0)%refs.length];
+ document.getElementById("greeting").textContent=
+  "God bless you, "+name+" ❤️";
+ try{
+  const res=await fetch(
+   API+"/bibles/"+bible+"/verses/"+dailyReference+
+   "?content-type=text&include-titles=false",
+   {headers:{"api-key":key}}
+  );
+  if(!res.ok) throw new Error("Verse unavailable");
+  const data=await res.json();
+  currentVerse=data.data.content;
+  document.getElementById("verse").textContent=currentVerse;
+  document.getElementById("reference").textContent=
+   data.data.reference;
+  document.getElementById("status").textContent=
+   "Your selected date: "+date;
+  currentExplanation="";
+  document.getElementById("explanation").textContent=
+   "Click Explain to understand this verse.";
+ }catch(e){
+  alert("Verse unavailable in this translation.");
+ }
+}
+
+async function readChapter(){
+ const bible=document.getElementById("bible").value;
+ const book=document.getElementById("book").value.trim();
+ const chapter=document.getElementById("chapter").value.trim();
+ const key=localStorage.getItem("bibleKey");
+ if(!bible || !book || !chapter || !key){
+  alert("Select a Bible and enter book and chapter IDs.");
+  return;
+ }
+ try{
+  const res=await fetch(
+   API+"/bibles/"+bible+"/chapters/"+book+"."+chapter+
+   "?content-type=text",
+   {headers:{"api-key":key}}
+  );
+  if(!res.ok) throw new Error("Chapter unavailable");
+  const data=await res.json();
+  document.getElementById("chapterContent").textContent=
+   data.data.content;
+ }catch(e){
+  alert("Could not load chapter. Check book and chapter IDs.");
+ }
+}
+
+async function explainVerse(){
+ if(!currentVerse){
+  alert("Get a Bible verse first.");
+  return;
+ }
+ document.getElementById("explanation").textContent=
+  "Modern Tamil explanation service must be connected. "+
+  "The explanation should describe the meaning, context and "+
+  "daily-life application of this verse in simple Tamil.";
+}
+
+function speak(type){
+ const text=type==="verse"?currentVerse:currentExplanation;
+ if(!text){alert("Content is not available yet.");return;}
+ stopVoice();
+ const msg=new SpeechSynthesisUtterance(text);
+ const lang=document.getElementById("language").value;
+ const locales={
+  eng:"en-US",tam:"ta-IN",hin:"hi-IN",
+  mal:"ml-IN",tel:"te-IN",kan:"kn-IN"
+ };
+ msg.lang=locales[lang]||"en-US";
+ msg.rate=0.88;
+ window.speechSynthesis.speak(msg);
+}
+
+function stopVoice(){
+ window.speechSynthesis.cancel();
+}
+</script>
+</body>
+</html>
