@@ -744,3 +744,503 @@ if ('speechSynthesis' in window) {
 // INITIALIZE
 
 init();
+
+const API = "https://bible.helloao.org/api";
+
+const $ = (id) => document.getElementById(id);
+
+let translations = [];
+let currentVerse = "";
+let currentExplanation = "";
+let currentSpeechRate = 0.9;
+let availableVoices = [];
+
+const dailyReferences = [
+  { book: "JHN", chapter: 14, verse: 27 },
+  { book: "PSA", chapter: 23, verse: 1 },
+  { book: "PHP", chapter: 4, verse: 6 },
+  { book: "ISA", chapter: 41, verse: 10 },
+  { book: "MAT", chapter: 11, verse: 28 },
+  { book: "ROM", chapter: 8, verse: 28 },
+  { book: "PSA", chapter: 46, verse: 1 }
+];
+
+const tamilExplanations = {
+  "JHN 14 27": "இந்த வசனத்தில் இயேசு நமக்கு உண்மையான சமாதானத்தை வாக்களிக்கிறார். உலகத்தில் பிரச்சினைகள் வந்தாலும் பயப்பட வேண்டாம். இயேசுவை நம்பி அவரிடம் ஜெபிக்கும்போது, நம் மனதிற்கு அமைதியும் தைரியமும் கிடைக்கும்.",
+  "PSA 23 1": "ஒரு மேய்ப்பர் தன் ஆடுகளை அன்போடு பாதுகாப்பது போல, கர்த்தர் நம்மை கவனித்துக் கொள்கிறார். நமக்கு என்ன தேவை என்பதை அவர் அறிவார். ஆகவே அவரை நம்பி வாழலாம்.",
+  "PHP 4 6": "எல்லாவற்றையும் நினைத்து கவலைப்படாமல், உங்கள் கவலைகளை ஜெபத்தின் மூலம் கடவுளிடம் சொல்லுங்கள். நன்றி உள்ள மனதோடு அவரிடம் பேசுங்கள். அவர் உங்கள் மனதிற்கு அமைதி தருவார்.",
+  "ISA 41 10": "நீங்கள் தனியாக இல்லை. கடவுள் உங்களுடன் இருக்கிறார். அதனால் பயப்பட வேண்டாம். கஷ்டமான நேரத்திலும் அவர் உங்களுக்கு பலமும் உதவியும் தருவார்.",
+  "MAT 11 28": "வாழ்க்கையில் சோர்வாகவோ கவலையாகவோ இருந்தால் இயேசுவிடம் வாருங்கள். உங்கள் பாரங்களை அவரிடம் ஒப்படையுங்கள். அவர் உங்கள் மனதிற்கு ஆறுதலும் ஓய்வும் தருவார்.",
+  "ROM 8 28": "நம் வாழ்க்கையில் நடக்கும் எல்லாவற்றையும் கடவுள் நன்மைக்காகச் செயல்படுத்த வல்லவர். இப்போது புரியவில்லை என்றாலும், அவரை நம்பிக்கையுடன் தொடருங்கள்.",
+  "PSA 46 1": "கடவுள் நமக்கு அடைக்கலமும் பலமும் ஆவார். பிரச்சினைகள் வரும் நேரத்தில் அவர் நமக்கு உதவத் தயாராக இருக்கிறார். அவரிடம் நம்பிக்கையுடன் செல்லலாம்."
+};
+
+function updateStatus(message) {
+  if ($("sourceStatus")) $("sourceStatus").textContent = message;
+}
+
+function showToast(message) {
+  const el = $("toast");
+  if (!el) return;
+  el.textContent = message;
+  el.classList.add("show");
+  setTimeout(() => el.classList.remove("show"), 3000);
+}
+
+function getLanguageCode() {
+  return ($("languageSelect")?.value || "en").toLowerCase();
+}
+
+function getSelectedTranslation() {
+  return $("translationSelect")?.value || "";
+}
+
+function getSpeechLanguage() {
+  const lang = getLanguageCode();
+  const locales = {
+    ta: "ta-IN",
+    en: "en-US",
+    hi: "hi-IN",
+    ml: "ml-IN",
+    te: "te-IN",
+    kn: "kn-IN"
+  };
+  return locales[lang] || lang;
+}
+
+function refreshVoices() {
+  if ("speechSynthesis" in window) {
+    availableVoices = speechSynthesis.getVoices() || [];
+  }
+}
+
+if ("speechSynthesis" in window) {
+  refreshVoices();
+  speechSynthesis.onvoiceschanged = refreshVoices;
+}
+
+// Voice speed control button
+function addVoiceSpeedButton() {
+  if ($("voiceSpeedBtn")) return;
+
+  const button = document.createElement("button");
+  button.id = "voiceSpeedBtn";
+  button.type = "button";
+  button.textContent = "Voice Speed: 0.9x";
+  button.className = "voice-speed-button";
+
+  const target =
+    $("readVerseBtn") ||
+    $("readExplanationBtn") ||
+    $("readChapterBtn");
+
+  if (target?.parentNode) {
+    target.parentNode.insertBefore(button, target.nextSibling);
+  } else {
+    document.body.appendChild(button);
+  }
+
+  button.addEventListener("click", () => {
+    const speeds = [0.7, 0.9, 1.0, 1.1];
+    let index = speeds.indexOf(currentSpeechRate);
+    currentSpeechRate = speeds[(index + 1) % speeds.length];
+
+    button.textContent =
+      `Voice Speed: ${currentSpeechRate.toFixed(1)}x`;
+
+    showToast(`Voice speed ${currentSpeechRate}x`);
+  });
+}
+
+function chooseVoice() {
+  refreshVoices();
+
+  const locale = getSpeechLanguage().toLowerCase();
+
+  const matches = availableVoices.filter(voice =>
+    (voice.lang || "")
+      .toLowerCase()
+      .replace("_", "-")
+      .startsWith(locale)
+  );
+
+  if (!matches.length) return null;
+
+  return matches.find(voice => voice.localService) || matches[0];
+}
+
+function speak(text) {
+  if (!("speechSynthesis" in window)) {
+    showToast("Voice support is not available.");
+    return;
+  }
+
+  if (!text || !text.trim()) return;
+
+  speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+
+  utterance.lang = getSpeechLanguage();
+  utterance.rate = currentSpeechRate;
+  utterance.pitch = 1.04;
+
+  const voice = chooseVoice();
+
+  if (voice) {
+    utterance.voice = voice;
+  } else if (getLanguageCode() === "ta") {
+    showToast(
+      "Tamil voice not found. Install a Tamil voice on your device."
+    );
+  }
+
+  speechSynthesis.speak(utterance);
+}
+
+function extractText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+
+  return content.map(item => {
+    if (typeof item === "string") return item;
+    if (item?.text) return item.text;
+    if (item?.heading) return item.heading;
+    if (Array.isArray(item?.content)) {
+      return extractText(item.content);
+    }
+    return "";
+  }).filter(Boolean).join(" ").trim();
+}
+
+async function api(url) {
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Bible API error: ${response.status}`);
+  }
+
+  return response.json();
+}
+
+async function loadTranslations() {
+  try {
+    updateStatus("Loading Bible translations...");
+
+    const data = await api(
+      `${API}/available_translations.json`
+    );
+
+    translations = data.translations || [];
+
+    const select = $("translationSelect");
+    if (!select) return;
+
+    select.innerHTML = "";
+
+    translations.forEach(item => {
+      const option = document.createElement("option");
+      option.value = item.id;
+      option.textContent =
+        `${item.name} (${item.language})`;
+
+      select.appendChild(option);
+    });
+
+    if (translations.length) {
+      select.value = translations[0].id;
+    }
+
+    updateStatus("Bible translations loaded.");
+
+  } catch (error) {
+    updateStatus("Unable to load Bible translations.");
+    console.error(error);
+  }
+}
+
+async function getVerse(
+  translation,
+  book,
+  chapter,
+  verseNumber
+) {
+  const data = await api(
+    `${API}/${translation}/${book}/${chapter}.simple.json`
+  );
+
+  const content = data.chapter?.content || [];
+
+  const verse = content.find(
+    item => item.number === verseNumber
+  );
+
+  if (!verse) throw new Error("Verse not found.");
+
+  return extractText(verse.content);
+}
+
+async function showDailyVerse() {
+  const name =
+    $("visitorName")?.value.trim() || "Friend";
+
+  const date =
+    $("verseDate")?.value ||
+    new Date().toISOString().slice(0, 10);
+
+  const translation = getSelectedTranslation();
+
+  if (!translation) {
+    showToast("Please select a Bible translation.");
+    return;
+  }
+
+  try {
+    updateStatus("Finding your daily Bible verse...");
+
+    const dayNumber = Math.floor(
+      new Date(`${date}T12:00:00`).getTime() / 86400000
+    );
+
+    const ref =
+      dailyReferences[
+        Math.abs(dayNumber) % dailyReferences.length
+      ];
+
+    const verse = await getVerse(
+      translation,
+      ref.book,
+      ref.chapter,
+      ref.verse
+    );
+
+    currentVerse = verse;
+    currentExplanation = "";
+
+    if ($("greetingText")) {
+      $("greetingText").textContent =
+        `God bless you, ${name}.`;
+    }
+
+    if ($("verseText")) {
+      $("verseText").textContent = verse;
+    }
+
+    if ($("verseReference")) {
+      $("verseReference").textContent =
+        `${ref.book} ${ref.chapter}:${ref.verse}`;
+    }
+
+    if ($("dailyResult")) {
+      $("dailyResult").hidden = false;
+    }
+
+    if ($("explanationBox")) {
+      $("explanationBox").hidden = true;
+    }
+
+    updateStatus("Your daily verse is ready.");
+
+  } catch (error) {
+    showToast("Unable to load verse. Try another translation.");
+    updateStatus(error.message);
+    console.error(error);
+  }
+}
+
+function explainVerse() {
+  if (!currentVerse) {
+    showToast("First get your daily Bible verse.");
+    return;
+  }
+
+  const reference =
+    ($("verseReference")?.textContent || "")
+      .replace(":", " ")
+      .toUpperCase();
+
+  if (getLanguageCode() === "ta") {
+    currentExplanation =
+      tamilExplanations[reference] ||
+      "இந்த வசனம் கடவுளை நம்பிக்கையுடன் வாழ நமக்கு நினைவூட்டுகிறது. வாழ்க்கையில் சோதனைகள் வந்தாலும் நம்பிக்கையை இழக்க வேண்டாம். இந்த வசனத்தைச் சுற்றியுள்ள வேதாகமப் பகுதியையும் படித்தால் இதன் முழு அர்த்தத்தை இன்னும் நன்றாகப் புரிந்துகொள்ளலாம்.";
+  } else {
+    currentExplanation =
+      "This verse reminds us to trust God and follow His guidance in everyday life. Even during difficult moments, keep faith, pray, and remember the hope in God's message.";
+  }
+
+  if ($("explanationText")) {
+    $("explanationText").textContent = currentExplanation;
+  }
+
+  if ($("explanationBox")) {
+    $("explanationBox").hidden = false;
+  }
+
+  // Automatically speak explanation in selected language.
+  speak(currentExplanation);
+}
+
+async function loadBooks() {
+  const translation = getSelectedTranslation();
+  if (!translation) return;
+
+  try {
+    const data = await api(
+      `${API}/${translation}/books.json`
+    );
+
+    const select = $("bookSelect");
+    if (!select) return;
+
+    select.innerHTML = "";
+
+    (data.books || []).forEach(book => {
+      const option = document.createElement("option");
+      option.value = book.id;
+      option.textContent = book.name;
+      select.appendChild(option);
+    });
+
+    await loadChapters();
+
+  } catch (error) {
+    showToast("Unable to load Bible books.");
+    console.error(error);
+  }
+}
+
+async function loadChapters() {
+  const translation = getSelectedTranslation();
+  const book = $("bookSelect")?.value;
+
+  if (!translation || !book) return;
+
+  try {
+    const data = await api(
+      `${API}/${translation}/${book}/1.simple.json`
+    );
+
+    const total =
+      data.book?.numberOfChapters || 1;
+
+    const select = $("chapterSelect");
+    if (!select) return;
+
+    select.innerHTML = "";
+
+    for (let number = 1; number <= total; number++) {
+      const option = document.createElement("option");
+      option.value = number;
+      option.textContent = `Chapter ${number}`;
+      select.appendChild(option);
+    }
+
+  } catch (error) {
+    showToast("Unable to load chapters.");
+    console.error(error);
+  }
+}
+
+async function loadChapter() {
+  const translation = getSelectedTranslation();
+  const book = $("bookSelect")?.value;
+  const chapter =
+    Number($("chapterSelect")?.value || 1);
+
+  if (!translation || !book) {
+    showToast("Select a book and translation.");
+    return;
+  }
+
+  try {
+    updateStatus("Loading Bible chapter...");
+
+    const data = await api(
+      `${API}/${translation}/${book}/${chapter}.simple.json`
+    );
+
+    const content = data.chapter?.content || [];
+    const lines = [];
+
+    content.forEach(item => {
+      if (item.type === "heading") {
+        lines.push(`\n${extractText(item.content)}\n`);
+      } else if (item.number && item.content) {
+        lines.push(
+          `${item.number}. ${extractText(item.content)}`
+        );
+      }
+    });
+
+    const output = lines.join("\n\n");
+
+    if ($("chapterHeading")) {
+      $("chapterHeading").textContent =
+        `${data.book?.name || book} — Chapter ${chapter}`;
+    }
+
+    if ($("chapterContent")) {
+      $("chapterContent").textContent =
+        output || "No chapter text available.";
+    }
+
+    if ($("chapterToolbar")) {
+      $("chapterToolbar").hidden = false;
+    }
+
+    updateStatus("Chapter loaded.");
+
+  } catch (error) {
+    showToast("Unable to load chapter.");
+    updateStatus(error.message);
+    console.error(error);
+  }
+}
+
+function stopSpeech() {
+  if ("speechSynthesis" in window) {
+    speechSynthesis.cancel();
+  }
+}
+
+function bind(id, event, handler) {
+  const element = $(id);
+  if (element) {
+    element.addEventListener(event, handler);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+
+  addVoiceSpeedButton();
+
+  bind("getVerseBtn", "click", showDailyVerse);
+
+  bind("readVerseBtn", "click", () => {
+    speak(currentVerse);
+  });
+
+  bind("explainBtn", "click", explainVerse);
+
+  bind("readExplanationBtn", "click", () => {
+    speak(currentExplanation);
+  });
+
+  bind("stopSpeechBtn", "click", stopSpeech);
+
+  bind("loadChapterBtn", "click", loadChapter);
+
+  bind("readChapterBtn", "click", () => {
+    speak($("chapterContent")?.textContent || "");
+  });
+
+  bind("bookSelect", "change", loadChapters);
+
+  bind("translationSelect", "change", async () => {
+    await loadBooks();
+  });
+
+  await loadTranslations();
+  await loadBooks();
+});
+
