@@ -1,9 +1,7 @@
 
-
 'use strict';
 
 const API = 'https://bible.helloao.org/api';
-
 const $ = id => document.getElementById(id);
 
 const els = {
@@ -39,8 +37,10 @@ let currentVerse = null;
 let currentExplanation = '';
 let currentTranslation = null;
 let currentChapterVerses = [];
-let speech = null;
+let currentSpeechRate = 0.9;
+let availableVoices = [];
 let toastTimer;
+
 const chapterCache = new Map();
 const booksCache = new Map();
 
@@ -82,6 +82,9 @@ const TAMIL_MEANINGS = {
   'ISA 41:10':
     'பயப்படாதே. நீ பலவீனமாக இருக்கும்போது கடவுள் உனக்குப் பலம் தருவார். எந்தச் சூழ்நிலையிலும் அவர் உன்னைக் கைவிடமாட்டார்.',
 
+  'ISA 40:31':
+    'கர்த்தரை நம்புகிறவர்கள் புதிய பலத்தைப் பெறுவார்கள். சோர்வாக இருந்தாலும் நம்பிக்கையை விடாமல் அவரைச் சார்ந்திரு.',
+
   'JER 29:11':
     'உன் எதிர்காலம் பற்றி கவலைப்படுகிறாயா? கடவுள் உனக்காக நன்மையான திட்டங்களைக் கொண்டிருக்கிறார் என்ற நம்பிக்கையை இந்த வசனம் நினைவூட்டுகிறது.',
 
@@ -106,6 +109,9 @@ const TAMIL_MEANINGS = {
   'PHP 4:7':
     'பிரச்சினைகள் உடனே மறையாவிட்டாலும் கடவுள் தரும் சமாதானம் உன் மனதைப் பாதுகாக்கும். அவரை நம்பிக்கையோடு சார்ந்திரு.',
 
+  'PHP 4:13':
+    'எல்லா சூழ்நிலைகளையும் எதிர்கொள்ள தேவையான பலத்தை கிறிஸ்து நமக்குத் தருகிறார். அவரை நம்பி முன்னேறலாம்.',
+
   '1PE 5:7':
     'உன் மனதில் இருக்கும் எல்லா கவலைகளையும் கடவுளிடம் ஒப்படை. ஏனென்றால் அவர் உன்னை அக்கறையோடு கவனித்துக்கொள்கிறார்.',
 
@@ -125,6 +131,8 @@ const TAMIL_MEANINGS = {
     'கடவுளை நம்பி அவருடன் நெருக்கமாக வாழும்போது அவர் உனக்கு அடைக்கலமாக இருக்கிறார். அவருடைய பாதுகாப்பை நம்பு.'
 };
 
+// BASIC HELPERS
+
 function toast(message) {
   if (!els.toast) return;
 
@@ -136,6 +144,10 @@ function toast(message) {
   toastTimer = setTimeout(() => {
     els.toast.classList.remove('show');
   }, 3500);
+}
+
+function updateStatus(message) {
+  if (els.status) els.status.textContent = message;
 }
 
 async function api(url) {
@@ -174,12 +186,22 @@ function translationId(t) {
 }
 
 function getLanguage(t) {
-  return t.language || '';
+  return (t.language || '').toLowerCase();
 }
 
-// LOAD ALL AVAILABLE LANGUAGES
+function getSelectedLanguage() {
+  return (els.language?.value || 'eng').toLowerCase();
+}
 
-function loadLanguages(preferred = 'tam') {
+function getSelectedTranslation() {
+  return translations.find(
+    t => translationId(t) === els.translation?.value
+  ) || null;
+}
+
+// LANGUAGE AND TRANSLATION
+
+function loadLanguages(preferred = 'eng') {
   const map = new Map();
 
   translations.forEach(t => {
@@ -207,6 +229,7 @@ function loadLanguages(preferred = 'tam') {
     els.language.appendChild(option);
   });
 
+  // English is the default language.
   els.language.value = map.has(preferred)
     ? preferred
     : (map.has('eng') ? 'eng' : languages[0]?.[0]);
@@ -216,10 +239,8 @@ function loadLanguages(preferred = 'tam') {
   loadTranslations();
 }
 
-// LOAD TRANSLATIONS
-
 function loadTranslations() {
-  const language = els.language.value;
+  const language = getSelectedLanguage();
 
   const filtered = translations.filter(
     t => getLanguage(t) === language
@@ -240,28 +261,41 @@ function loadTranslations() {
   els.translation.disabled = !filtered.length;
 
   if (!filtered.length) {
-    toast('No translation available for this language.');
+    currentTranslation = null;
+    toast('No Bible translation available for this language.');
     return;
   }
 
-  const preferred =
-    filtered.find(t => translationId(t) === 'TAM') || filtered[0];
+  // Prefer a commonly used translation when available.
+  const preferred = filtered.find(t =>
+    language === 'tam'
+      ? translationId(t) === 'TAM'
+      : translationId(t) === 'BSB'
+  ) || filtered[0];
 
   els.translation.value = translationId(preferred);
-
   currentTranslation = preferred;
 
+  chapterCache.clear();
+
+  if (els.result) els.result.hidden = true;
+  if (els.explanationBox) els.explanationBox.hidden = true;
+  if (els.chapterToolbar) els.chapterToolbar.hidden = true;
+
+  stopVoice();
   loadBooks();
 }
 
-// LOAD BOOKS
+// BOOKS AND CHAPTERS
 
 async function getBooks(id) {
   if (booksCache.has(id)) {
     return booksCache.get(id);
   }
 
-  const data = await api(`${API}/${encodeURIComponent(id)}/books.json`);
+  const data = await api(
+    `${API}/${encodeURIComponent(id)}/books.json`
+  );
 
   const books = data.books || [];
 
@@ -326,8 +360,6 @@ function setChapters() {
   els.loadChapter.disabled = false;
 }
 
-// GET CHAPTER
-
 async function getChapter(id, book, number) {
   const key = `${id}/${book}/${number}`;
 
@@ -372,8 +404,7 @@ async function getDailyVerse() {
   els.explanationBox.hidden = true;
 
   stopVoice();
-
-  els.status.textContent = 'Finding your daily verse...';
+  updateStatus('Finding your daily verse...');
 
   try {
     const books = await getBooks(id);
@@ -397,9 +428,16 @@ async function getDailyVerse() {
           v => Number(v.number) === verseNumber
         );
 
-        if (verse?.text) {
+        if (verse) {
+          const verseText = verse.text ||
+            (Array.isArray(verse.content)
+              ? verse.content.map(x => x.text || '').join(' ')
+              : '');
+
+          if (!verseText) continue;
+
           found = {
-            text: verse.text,
+            text: verseText,
             book,
             chapter,
             verse: verseNumber,
@@ -433,7 +471,6 @@ async function getDailyVerse() {
       });
 
     els.greeting.textContent = `For ${name} · ${displayDate}`;
-
     els.verse.textContent = `“${found.text}”`;
 
     els.reference.textContent =
@@ -443,24 +480,19 @@ async function getDailyVerse() {
       found.translation?.licenseNotice ||
       found.translation?.licenseNotes || '';
 
-    const key = `${found.book} ${found.chapter}:${found.verse}`;
-
-    currentExplanation =
-      TAMIL_MEANINGS[key] ||
-      'இந்த வசனம் கடவுளை நம்பிக்கையோடு சார்ந்து வாழ நம்மை நினைவூட்டுகிறது. உன் வாழ்க்கையில் இப்போது இருக்கும் சூழ்நிலையை நினைத்துப் பார். கடவுளிடம் ஜெபித்து, அவருடைய வார்த்தையை உன் வாழ்க்கையில் பின்பற்ற முயற்சி செய்.';
+    currentExplanation = '';
 
     els.result.hidden = false;
-
-    els.status.textContent =
-      'Your daily Bible verse is ready. Take a peaceful moment.';
-
     els.explain.disabled = false;
+
+    updateStatus(
+      'Your daily Bible verse is ready. Take a peaceful moment.'
+    );
 
   } catch (error) {
     console.error(error);
 
-    els.status.textContent = error.message;
-
+    updateStatus(error.message);
     toast('Bible verse could not load. Check your internet connection.');
 
   } finally {
@@ -468,7 +500,7 @@ async function getDailyVerse() {
   }
 }
 
-// VOICE SETTINGS
+// LANGUAGE-SPECIFIC VOICE
 
 function localeFor(code) {
   const locales = {
@@ -488,7 +520,30 @@ function localeFor(code) {
     zho: 'zh-CN'
   };
 
-  return locales[code] || 'en-US';
+  return locales[(code || 'eng').toLowerCase()] || 'en-US';
+}
+
+function refreshVoices() {
+  if ('speechSynthesis' in window) {
+    availableVoices = speechSynthesis.getVoices() || [];
+  }
+}
+
+function chooseVoice(language) {
+  refreshVoices();
+
+  const locale = language.toLowerCase();
+
+  const matches = availableVoices.filter(voice =>
+    (voice.lang || '')
+      .toLowerCase()
+      .replace('_', '-')
+      .startsWith(locale)
+  );
+
+  if (!matches.length) return null;
+
+  return matches.find(voice => voice.localService) || matches[0];
 }
 
 function speak(text, language) {
@@ -497,26 +552,26 @@ function speak(text, language) {
     return;
   }
 
-  if (!text) return;
+  if (!text || !text.trim()) return;
 
   stopVoice();
 
   const utterance = new SpeechSynthesisUtterance(text);
 
   utterance.lang = language;
-  utterance.rate = 0.90;
-  utterance.pitch = 1;
+  utterance.rate = currentSpeechRate;
+  utterance.pitch = 1.04;
 
-  const voices = speechSynthesis.getVoices();
-
-  const prefix = language.split('-')[0];
-
-  const voice =
-    voices.find(v => v.lang.toLowerCase() === language.toLowerCase()) ||
-    voices.find(v => v.lang.toLowerCase().startsWith(prefix));
+  const voice = chooseVoice(language);
 
   if (voice) {
     utterance.voice = voice;
+  } else {
+    const selectedLanguage = getSelectedLanguage();
+
+    if (selectedLanguage === 'tam') {
+      toast('Tamil voice not found. Install a Tamil voice on your device.');
+    }
   }
 
   utterance.onstart = () => {
@@ -525,19 +580,15 @@ function speak(text, language) {
 
   utterance.onend = () => {
     els.stop.disabled = true;
-    speech = null;
   };
 
   utterance.onerror = event => {
     els.stop.disabled = true;
-    speech = null;
 
     if (!['canceled', 'interrupted'].includes(event.error)) {
       toast('Voice failed. Check your device language voices.');
     }
   };
-
-  speech = utterance;
 
   speechSynthesis.speak(utterance);
 }
@@ -547,9 +598,7 @@ function stopVoice() {
     speechSynthesis.cancel();
   }
 
-  speech = null;
-
-  els.stop.disabled = true;
+  if (els.stop) els.stop.disabled = true;
 }
 
 // READ VERSE
@@ -561,13 +610,13 @@ function readVerse() {
   }
 
   const language = localeFor(
-    currentVerse.translation?.language || 'eng'
+    currentVerse.translation?.language || getSelectedLanguage()
   );
 
   speak(currentVerse.text, language);
 }
 
-// MODERN TAMIL EXPLANATION + AUTOMATIC VOICE
+// EXPLANATION IN SELECTED LANGUAGE
 
 function explainVerse() {
   if (!currentVerse) {
@@ -575,14 +624,39 @@ function explainVerse() {
     return;
   }
 
-  els.explanation.textContent = currentExplanation;
+  const language = getSelectedLanguage();
 
+  const key =
+    `${currentVerse.book} ${currentVerse.chapter}:${currentVerse.verse}`;
+
+  if (language === 'tam') {
+    currentExplanation =
+      TAMIL_MEANINGS[key] ||
+      'இந்த வசனம் கடவுளை நம்பிக்கையுடன் வாழ நமக்கு நினைவூட்டுகிறது. வாழ்க்கையில் சோதனைகள் வந்தாலும் நம்பிக்கையை இழக்க வேண்டாம். இந்த வசனத்தைப் பற்றி ஜெபித்து சிந்தித்துப் பாருங்கள்.';
+  } else {
+    currentExplanation =
+      'This verse reminds us to trust God and follow His guidance in everyday life. Even during difficult moments, keep faith, pray, and remember the hope in God’s message. Take a quiet moment to think about how you can apply this verse in your life.';
+  }
+
+  els.explanation.textContent = currentExplanation;
   els.explanationBox.hidden = false;
 
-  // Jesus Tyson narration label.
-  // The actual voice is the Tamil voice installed in your device.
+  // Speak the explanation in the selected language.
+  speak(currentExplanation, localeFor(language));
+}
 
-  speak(currentExplanation, 'ta-IN');
+// READ EXPLANATION BUTTON
+
+function readExplanation() {
+  if (!currentExplanation) {
+    toast('Please explain the verse first.');
+    return;
+  }
+
+  speak(
+    currentExplanation,
+    localeFor(getSelectedLanguage())
+  );
 }
 
 // READ FULL CHAPTER
@@ -609,7 +683,6 @@ async function loadSelectedChapter() {
       book;
 
     els.chapterHeading.textContent = `${bookName} ${number}`;
-
     els.chapterContent.innerHTML = '';
 
     result.verses.forEach(verse => {
@@ -622,10 +695,13 @@ async function loadSelectedChapter() {
 
       const textElement = document.createElement('p');
       textElement.className = 'verse-line';
-      textElement.textContent = verse.text;
+
+      textElement.textContent = verse.text ||
+        (Array.isArray(verse.content)
+          ? verse.content.map(x => x.text || '').join(' ')
+          : '');
 
       row.append(numberElement, textElement);
-
       els.chapterContent.appendChild(row);
     });
 
@@ -647,24 +723,65 @@ function readFullChapter() {
   }
 
   const text = currentChapterVerses
-    .map(v => `${v.number}. ${v.text}`)
+    .map(v => `${v.number}. ${v.text || ''}`)
     .join(' ');
 
-  speak(
-    text,
-    localeFor(currentTranslation?.language || 'eng')
+  const language = localeFor(
+    currentTranslation?.language || getSelectedLanguage()
   );
+
+  speak(text, language);
 }
 
-// START WEBSITE
+// VOICE SPEED BUTTON
+
+function addVoiceSpeedButton() {
+  if ($('voiceSpeedBtn')) return;
+
+  const button = document.createElement('button');
+
+  button.id = 'voiceSpeedBtn';
+  button.type = 'button';
+  button.textContent = 'Voice Speed: 0.9x';
+  button.className = 'voice-speed-button';
+
+  const target =
+    els.readVerse ||
+    els.readExplanation ||
+    els.readChapter;
+
+  if (target?.parentNode) {
+    target.parentNode.insertBefore(button, target.nextSibling);
+  } else {
+    document.body.appendChild(button);
+  }
+
+  button.addEventListener('click', () => {
+    const speeds = [0.7, 0.9, 1.0, 1.1];
+
+    let index = speeds.indexOf(currentSpeechRate);
+
+    currentSpeechRate =
+      speeds[(index + 1) % speeds.length];
+
+    button.textContent =
+      `Voice Speed: ${currentSpeechRate.toFixed(1)}x`;
+
+    toast(`Voice speed ${currentSpeechRate}x`);
+  });
+}
+
+// INITIALIZE WEBSITE
 
 async function init() {
   els.date.value = todayString();
 
   els.find.disabled = true;
+  els.language.disabled = true;
+  els.translation.disabled = true;
 
   try {
-    els.status.textContent = 'Connecting to Bible library...';
+    updateStatus('Connecting to Bible library...');
 
     const data = await api(
       `${API}/available_translations.json`
@@ -677,22 +794,21 @@ async function init() {
       throw new Error('No Bible translations found.');
     }
 
-    const tamilAvailable = translations.some(
-      t => t.language === 'tam'
-    );
-
-    loadLanguages(tamilAvailable ? 'tam' : 'eng');
+    // DEFAULT LANGUAGE IS ENGLISH.
+    loadLanguages('eng');
 
     els.find.disabled = false;
 
-    els.status.textContent =
-      `Connected · ${translations.length} available translation records.`;
+    updateStatus(
+      `Connected · ${translations.length} available translation records.`
+    );
 
   } catch (error) {
     console.error(error);
 
-    els.status.textContent =
-      'Could not connect. Please check internet and refresh.';
+    updateStatus(
+      'Could not connect. Please check internet and refresh.'
+    );
 
     toast('Bible library connection failed.');
   }
@@ -701,546 +817,38 @@ async function init() {
 // BUTTON EVENTS
 
 els.language.addEventListener('change', () => {
+  stopVoice();
   loadTranslations();
 });
 
 els.translation.addEventListener('change', () => {
-  currentTranslation = translations.find(
-    t => translationId(t) === els.translation.value
-  );
+  currentTranslation = getSelectedTranslation();
 
   chapterCache.clear();
 
   els.result.hidden = true;
+  els.explanationBox.hidden = true;
   els.chapterToolbar.hidden = true;
 
+  stopVoice();
   loadBooks();
 });
 
 els.find.addEventListener('click', getDailyVerse);
-
 els.readVerse.addEventListener('click', readVerse);
-
 els.explain.addEventListener('click', explainVerse);
-
-els.readExplanation.addEventListener('click', () => {
-  speak(currentExplanation, 'ta-IN');
-});
-
+els.readExplanation.addEventListener('click', readExplanation);
 els.stop.addEventListener('click', stopVoice);
-
 els.book.addEventListener('change', setChapters);
-
 els.loadChapter.addEventListener('click', loadSelectedChapter);
-
 els.readChapter.addEventListener('click', readFullChapter);
 
 if ('speechSynthesis' in window) {
-  speechSynthesis.onvoiceschanged = () => {
-    speechSynthesis.getVoices();
-  };
-}
-
-// INITIALIZE
-
-init();
-
-const API = "https://bible.helloao.org/api";
-
-const $ = (id) => document.getElementById(id);
-
-let translations = [];
-let currentVerse = "";
-let currentExplanation = "";
-let currentSpeechRate = 0.9;
-let availableVoices = [];
-
-const dailyReferences = [
-  { book: "JHN", chapter: 14, verse: 27 },
-  { book: "PSA", chapter: 23, verse: 1 },
-  { book: "PHP", chapter: 4, verse: 6 },
-  { book: "ISA", chapter: 41, verse: 10 },
-  { book: "MAT", chapter: 11, verse: 28 },
-  { book: "ROM", chapter: 8, verse: 28 },
-  { book: "PSA", chapter: 46, verse: 1 }
-];
-
-const tamilExplanations = {
-  "JHN 14 27": "இந்த வசனத்தில் இயேசு நமக்கு உண்மையான சமாதானத்தை வாக்களிக்கிறார். உலகத்தில் பிரச்சினைகள் வந்தாலும் பயப்பட வேண்டாம். இயேசுவை நம்பி அவரிடம் ஜெபிக்கும்போது, நம் மனதிற்கு அமைதியும் தைரியமும் கிடைக்கும்.",
-  "PSA 23 1": "ஒரு மேய்ப்பர் தன் ஆடுகளை அன்போடு பாதுகாப்பது போல, கர்த்தர் நம்மை கவனித்துக் கொள்கிறார். நமக்கு என்ன தேவை என்பதை அவர் அறிவார். ஆகவே அவரை நம்பி வாழலாம்.",
-  "PHP 4 6": "எல்லாவற்றையும் நினைத்து கவலைப்படாமல், உங்கள் கவலைகளை ஜெபத்தின் மூலம் கடவுளிடம் சொல்லுங்கள். நன்றி உள்ள மனதோடு அவரிடம் பேசுங்கள். அவர் உங்கள் மனதிற்கு அமைதி தருவார்.",
-  "ISA 41 10": "நீங்கள் தனியாக இல்லை. கடவுள் உங்களுடன் இருக்கிறார். அதனால் பயப்பட வேண்டாம். கஷ்டமான நேரத்திலும் அவர் உங்களுக்கு பலமும் உதவியும் தருவார்.",
-  "MAT 11 28": "வாழ்க்கையில் சோர்வாகவோ கவலையாகவோ இருந்தால் இயேசுவிடம் வாருங்கள். உங்கள் பாரங்களை அவரிடம் ஒப்படையுங்கள். அவர் உங்கள் மனதிற்கு ஆறுதலும் ஓய்வும் தருவார்.",
-  "ROM 8 28": "நம் வாழ்க்கையில் நடக்கும் எல்லாவற்றையும் கடவுள் நன்மைக்காகச் செயல்படுத்த வல்லவர். இப்போது புரியவில்லை என்றாலும், அவரை நம்பிக்கையுடன் தொடருங்கள்.",
-  "PSA 46 1": "கடவுள் நமக்கு அடைக்கலமும் பலமும் ஆவார். பிரச்சினைகள் வரும் நேரத்தில் அவர் நமக்கு உதவத் தயாராக இருக்கிறார். அவரிடம் நம்பிக்கையுடன் செல்லலாம்."
-};
-
-function updateStatus(message) {
-  if ($("sourceStatus")) $("sourceStatus").textContent = message;
-}
-
-function showToast(message) {
-  const el = $("toast");
-  if (!el) return;
-  el.textContent = message;
-  el.classList.add("show");
-  setTimeout(() => el.classList.remove("show"), 3000);
-}
-
-function getLanguageCode() {
-  return ($("languageSelect")?.value || "en").toLowerCase();
-}
-
-function getSelectedTranslation() {
-  return $("translationSelect")?.value || "";
-}
-
-function getSpeechLanguage() {
-  const lang = getLanguageCode();
-  const locales = {
-    ta: "ta-IN",
-    en: "en-US",
-    hi: "hi-IN",
-    ml: "ml-IN",
-    te: "te-IN",
-    kn: "kn-IN"
-  };
-  return locales[lang] || lang;
-}
-
-function refreshVoices() {
-  if ("speechSynthesis" in window) {
-    availableVoices = speechSynthesis.getVoices() || [];
-  }
-}
-
-if ("speechSynthesis" in window) {
   refreshVoices();
   speechSynthesis.onvoiceschanged = refreshVoices;
 }
 
-// Voice speed control button
-function addVoiceSpeedButton() {
-  if ($("voiceSpeedBtn")) return;
+// START
 
-  const button = document.createElement("button");
-  button.id = "voiceSpeedBtn";
-  button.type = "button";
-  button.textContent = "Voice Speed: 0.9x";
-  button.className = "voice-speed-button";
-
-  const target =
-    $("readVerseBtn") ||
-    $("readExplanationBtn") ||
-    $("readChapterBtn");
-
-  if (target?.parentNode) {
-    target.parentNode.insertBefore(button, target.nextSibling);
-  } else {
-    document.body.appendChild(button);
-  }
-
-  button.addEventListener("click", () => {
-    const speeds = [0.7, 0.9, 1.0, 1.1];
-    let index = speeds.indexOf(currentSpeechRate);
-    currentSpeechRate = speeds[(index + 1) % speeds.length];
-
-    button.textContent =
-      `Voice Speed: ${currentSpeechRate.toFixed(1)}x`;
-
-    showToast(`Voice speed ${currentSpeechRate}x`);
-  });
-}
-
-function chooseVoice() {
-  refreshVoices();
-
-  const locale = getSpeechLanguage().toLowerCase();
-
-  const matches = availableVoices.filter(voice =>
-    (voice.lang || "")
-      .toLowerCase()
-      .replace("_", "-")
-      .startsWith(locale)
-  );
-
-  if (!matches.length) return null;
-
-  return matches.find(voice => voice.localService) || matches[0];
-}
-
-function speak(text) {
-  if (!("speechSynthesis" in window)) {
-    showToast("Voice support is not available.");
-    return;
-  }
-
-  if (!text || !text.trim()) return;
-
-  speechSynthesis.cancel();
-
-  const utterance = new SpeechSynthesisUtterance(text);
-
-  utterance.lang = getSpeechLanguage();
-  utterance.rate = currentSpeechRate;
-  utterance.pitch = 1.04;
-
-  const voice = chooseVoice();
-
-  if (voice) {
-    utterance.voice = voice;
-  } else if (getLanguageCode() === "ta") {
-    showToast(
-      "Tamil voice not found. Install a Tamil voice on your device."
-    );
-  }
-
-  speechSynthesis.speak(utterance);
-}
-
-function extractText(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-
-  return content.map(item => {
-    if (typeof item === "string") return item;
-    if (item?.text) return item.text;
-    if (item?.heading) return item.heading;
-    if (Array.isArray(item?.content)) {
-      return extractText(item.content);
-    }
-    return "";
-  }).filter(Boolean).join(" ").trim();
-}
-
-async function api(url) {
-  const response = await fetch(url);
-
-  if (!response.ok) {
-    throw new Error(`Bible API error: ${response.status}`);
-  }
-
-  return response.json();
-}
-
-async function loadTranslations() {
-  try {
-    updateStatus("Loading Bible translations...");
-
-    const data = await api(
-      `${API}/available_translations.json`
-    );
-
-    translations = data.translations || [];
-
-    const select = $("translationSelect");
-    if (!select) return;
-
-    select.innerHTML = "";
-
-    translations.forEach(item => {
-      const option = document.createElement("option");
-      option.value = item.id;
-      option.textContent =
-        `${item.name} (${item.language})`;
-
-      select.appendChild(option);
-    });
-
-    if (translations.length) {
-      select.value = translations[0].id;
-    }
-
-    updateStatus("Bible translations loaded.");
-
-  } catch (error) {
-    updateStatus("Unable to load Bible translations.");
-    console.error(error);
-  }
-}
-
-async function getVerse(
-  translation,
-  book,
-  chapter,
-  verseNumber
-) {
-  const data = await api(
-    `${API}/${translation}/${book}/${chapter}.simple.json`
-  );
-
-  const content = data.chapter?.content || [];
-
-  const verse = content.find(
-    item => item.number === verseNumber
-  );
-
-  if (!verse) throw new Error("Verse not found.");
-
-  return extractText(verse.content);
-}
-
-async function showDailyVerse() {
-  const name =
-    $("visitorName")?.value.trim() || "Friend";
-
-  const date =
-    $("verseDate")?.value ||
-    new Date().toISOString().slice(0, 10);
-
-  const translation = getSelectedTranslation();
-
-  if (!translation) {
-    showToast("Please select a Bible translation.");
-    return;
-  }
-
-  try {
-    updateStatus("Finding your daily Bible verse...");
-
-    const dayNumber = Math.floor(
-      new Date(`${date}T12:00:00`).getTime() / 86400000
-    );
-
-    const ref =
-      dailyReferences[
-        Math.abs(dayNumber) % dailyReferences.length
-      ];
-
-    const verse = await getVerse(
-      translation,
-      ref.book,
-      ref.chapter,
-      ref.verse
-    );
-
-    currentVerse = verse;
-    currentExplanation = "";
-
-    if ($("greetingText")) {
-      $("greetingText").textContent =
-        `God bless you, ${name}.`;
-    }
-
-    if ($("verseText")) {
-      $("verseText").textContent = verse;
-    }
-
-    if ($("verseReference")) {
-      $("verseReference").textContent =
-        `${ref.book} ${ref.chapter}:${ref.verse}`;
-    }
-
-    if ($("dailyResult")) {
-      $("dailyResult").hidden = false;
-    }
-
-    if ($("explanationBox")) {
-      $("explanationBox").hidden = true;
-    }
-
-    updateStatus("Your daily verse is ready.");
-
-  } catch (error) {
-    showToast("Unable to load verse. Try another translation.");
-    updateStatus(error.message);
-    console.error(error);
-  }
-}
-
-function explainVerse() {
-  if (!currentVerse) {
-    showToast("First get your daily Bible verse.");
-    return;
-  }
-
-  const reference =
-    ($("verseReference")?.textContent || "")
-      .replace(":", " ")
-      .toUpperCase();
-
-  if (getLanguageCode() === "ta") {
-    currentExplanation =
-      tamilExplanations[reference] ||
-      "இந்த வசனம் கடவுளை நம்பிக்கையுடன் வாழ நமக்கு நினைவூட்டுகிறது. வாழ்க்கையில் சோதனைகள் வந்தாலும் நம்பிக்கையை இழக்க வேண்டாம். இந்த வசனத்தைச் சுற்றியுள்ள வேதாகமப் பகுதியையும் படித்தால் இதன் முழு அர்த்தத்தை இன்னும் நன்றாகப் புரிந்துகொள்ளலாம்.";
-  } else {
-    currentExplanation =
-      "This verse reminds us to trust God and follow His guidance in everyday life. Even during difficult moments, keep faith, pray, and remember the hope in God's message.";
-  }
-
-  if ($("explanationText")) {
-    $("explanationText").textContent = currentExplanation;
-  }
-
-  if ($("explanationBox")) {
-    $("explanationBox").hidden = false;
-  }
-
-  // Automatically speak explanation in selected language.
-  speak(currentExplanation);
-}
-
-async function loadBooks() {
-  const translation = getSelectedTranslation();
-  if (!translation) return;
-
-  try {
-    const data = await api(
-      `${API}/${translation}/books.json`
-    );
-
-    const select = $("bookSelect");
-    if (!select) return;
-
-    select.innerHTML = "";
-
-    (data.books || []).forEach(book => {
-      const option = document.createElement("option");
-      option.value = book.id;
-      option.textContent = book.name;
-      select.appendChild(option);
-    });
-
-    await loadChapters();
-
-  } catch (error) {
-    showToast("Unable to load Bible books.");
-    console.error(error);
-  }
-}
-
-async function loadChapters() {
-  const translation = getSelectedTranslation();
-  const book = $("bookSelect")?.value;
-
-  if (!translation || !book) return;
-
-  try {
-    const data = await api(
-      `${API}/${translation}/${book}/1.simple.json`
-    );
-
-    const total =
-      data.book?.numberOfChapters || 1;
-
-    const select = $("chapterSelect");
-    if (!select) return;
-
-    select.innerHTML = "";
-
-    for (let number = 1; number <= total; number++) {
-      const option = document.createElement("option");
-      option.value = number;
-      option.textContent = `Chapter ${number}`;
-      select.appendChild(option);
-    }
-
-  } catch (error) {
-    showToast("Unable to load chapters.");
-    console.error(error);
-  }
-}
-
-async function loadChapter() {
-  const translation = getSelectedTranslation();
-  const book = $("bookSelect")?.value;
-  const chapter =
-    Number($("chapterSelect")?.value || 1);
-
-  if (!translation || !book) {
-    showToast("Select a book and translation.");
-    return;
-  }
-
-  try {
-    updateStatus("Loading Bible chapter...");
-
-    const data = await api(
-      `${API}/${translation}/${book}/${chapter}.simple.json`
-    );
-
-    const content = data.chapter?.content || [];
-    const lines = [];
-
-    content.forEach(item => {
-      if (item.type === "heading") {
-        lines.push(`\n${extractText(item.content)}\n`);
-      } else if (item.number && item.content) {
-        lines.push(
-          `${item.number}. ${extractText(item.content)}`
-        );
-      }
-    });
-
-    const output = lines.join("\n\n");
-
-    if ($("chapterHeading")) {
-      $("chapterHeading").textContent =
-        `${data.book?.name || book} — Chapter ${chapter}`;
-    }
-
-    if ($("chapterContent")) {
-      $("chapterContent").textContent =
-        output || "No chapter text available.";
-    }
-
-    if ($("chapterToolbar")) {
-      $("chapterToolbar").hidden = false;
-    }
-
-    updateStatus("Chapter loaded.");
-
-  } catch (error) {
-    showToast("Unable to load chapter.");
-    updateStatus(error.message);
-    console.error(error);
-  }
-}
-
-function stopSpeech() {
-  if ("speechSynthesis" in window) {
-    speechSynthesis.cancel();
-  }
-}
-
-function bind(id, event, handler) {
-  const element = $(id);
-  if (element) {
-    element.addEventListener(event, handler);
-  }
-}
-
-document.addEventListener("DOMContentLoaded", async () => {
-
-  addVoiceSpeedButton();
-
-  bind("getVerseBtn", "click", showDailyVerse);
-
-  bind("readVerseBtn", "click", () => {
-    speak(currentVerse);
-  });
-
-  bind("explainBtn", "click", explainVerse);
-
-  bind("readExplanationBtn", "click", () => {
-    speak(currentExplanation);
-  });
-
-  bind("stopSpeechBtn", "click", stopSpeech);
-
-  bind("loadChapterBtn", "click", loadChapter);
-
-  bind("readChapterBtn", "click", () => {
-    speak($("chapterContent")?.textContent || "");
-  });
-
-  bind("bookSelect", "change", loadChapters);
-
-  bind("translationSelect", "change", async () => {
-    await loadBooks();
-  });
-
-  await loadTranslations();
-  await loadBooks();
-});
-
+addVoiceSpeedButton();
+init();
