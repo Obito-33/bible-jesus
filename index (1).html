@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#f4f1e8">
+  <meta name="description" content="A peaceful place to read the Bible, listen to Scripture, and understand verses in modern Tamil.">
+  <title>Still With Jesus — Daily Bible</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700&family=Noto+Sans+Tamil:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div>
+  <div class="ambient ambient-two" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="Still With Jesus home">
+      <span class="brand-mark">✝</span>
+      <span><strong>still with jesus</strong><small>A MOMENT OF PEACE</small></span>
+    </a>
+    <div class="header-note"><span class="live-dot"></span> A quiet moment with God</div>
+  </header>
+
+  <main id="top" class="page-shell">
+    <section class="intro">
+      <p class="eyebrow">PAUSE · BREATHE · RECEIVE</p>
+      <h1>Let your heart<br><em>find its peace.</em></h1>
+      <p class="intro-copy">A little time with God's Word can bring light to an ordinary day.</p>
+    </section>
+
+    <section class="daily-card panel" aria-labelledby="daily-title">
+      <div class="card-topline">
+        <div>
+          <span class="eyebrow">YOUR DAILY WORD</span>
+          <h2 id="daily-title">A verse for your day</h2>
+        </div>
+        <div class="sun-symbol" aria-hidden="true">☼</div>
+      </div>
+
+      <div class="form-grid">
+        <label class="field">
+          <span>Your name</span>
+          <input id="visitorName" type="text" maxlength="50" placeholder="Enter your name" autocomplete="given-name">
+        </label>
+        <label class="field">
+          <span>Choose a date</span>
+          <input id="verseDate" type="date">
+        </label>
+        <label class="field">
+          <span>Bible language</span>
+          <select id="languageSelect" disabled><option>Loading languages…</option></select>
+        </label>
+        <label class="field">
+          <span>Bible translation</span>
+          <select id="translationSelect" disabled><option>Loading translations…</option></select>
+        </label>
+      </div>
+      <div class="form-bottom">
+        <p id="sourceStatus" class="status-text" role="status">Connecting to the Bible library…</p>
+        <button id="getVerseBtn" class="button button-primary" disabled>Find my verse <span>→</span></button>
+      </div>
+
+      <div id="dailyResult" class="daily-result" hidden>
+        <div class="result-divider"><span></span><span id="greetingText">A word for you</span><span></span></div>
+        <p class="verse-label">TODAY'S SCRIPTURE</p>
+        <blockquote id="verseText" class="verse-text"></blockquote>
+        <p id="verseReference" class="verse-reference"></p>
+        <p id="licenseNotice" class="license-note"></p>
+        <div class="action-row">
+          <button id="readVerseBtn" class="button button-soft">▶ Read aloud</button>
+          <button id="explainBtn" class="button button-outline">Explain in modern Tamil</button>
+          <button id="stopSpeechBtn" class="button button-quiet" disabled>Stop voice</button>
+        </div>
+        <div id="explanationBox" class="explanation-box" hidden aria-live="polite">
+          <div class="explanation-heading"><span class="explain-icon">✦</span><div><span class="eyebrow">SIMPLE TAMIL MEANING</span><h3>இன்றைய வசனத்தின் அர்த்தம்</h3></div></div>
+          <p id="explanationText" class="tamil-text" lang="ta"></p>
+          <div class="explanation-footer"><span class="voice-name">Voice · Jesus Tyson</span><button id="readExplanationBtn" class="text-button">▶ விளக்கத்தைக் கேள்</button></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="reader-section panel" aria-labelledby="reader-title">
+      <div class="section-heading">
+        <div><span class="eyebrow">GO A LITTLE DEEPER</span><h2 id="reader-title">Read the Bible</h2></div>
+        <span class="book-decoration" aria-hidden="true">❧</span>
+      </div>
+      <p class="section-copy">Choose a book and chapter to read a full passage.</p>
+      <div class="reader-controls">
+        <label class="field"><span>Book</span><select id="bookSelect" disabled><option>Select a translation first</option></select></label>
+        <label class="field"><span>Chapter</span><select id="chapterSelect" disabled><option>—</option></select></label>
+        <button id="loadChapterBtn" class="button button-primary" disabled>Open chapter <span>→</span></button>
+      </div>
+      <div class="chapter-toolbar" id="chapterToolbar" hidden>
+        <div><p class="verse-label">READING NOW</p><h3 id="chapterHeading"></h3></div>
+        <button id="readChapterBtn" class="button button-soft">▶ Listen to chapter</button>
+      </div>
+      <div id="chapterContent" class="chapter-content" aria-live="polite">
+        <div class="empty-reading"><span>✧</span><p>Your reading space is ready.</p><small>Select a book and chapter to begin.</small></div>
+      </div>
+    </section>
+
+    <section class="closing-quote">
+      <span aria-hidden="true">“</span>
+      <p>Be still, and know that I am God.</p>
+      <small>PSALM 46:10</small>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Made for quiet moments, with love. <span>♡</span></p>
+    <p class="footer-small">Scripture data provided by <a href="https://bible.helloao.org/docs/" target="_blank" rel="noopener noreferrer">Free Use Bible API</a>. Translation rights and notices belong to their respective publishers.</p>
+  </footer>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
